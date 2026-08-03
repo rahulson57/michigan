@@ -6,7 +6,7 @@
  * time, PUT /api/articles/:id after that) and publishing hands off to
  * /article/:slug.
  *
- * Two notes worth keeping in mind if you touch this file:
+ * Four notes worth keeping in mind if you touch this file:
  *
  * 1. AUTH (DEC-146). useAuth() exposes `loading`. Nothing loads, saves or
  *    redirects until hydration finishes, so refreshing /write/:id while signed
@@ -18,6 +18,25 @@
  *    author's own lists (GET /api/articles/me/drafts, then
  *    GET /api/articles?author=…) and then fetches the full article. Cheap, and
  *    it needs no server change — server/routes/articles.js is owned by T1.
+ *
+ * 3. SESSIONS AND GENERATIONS — the part that keeps drafts from eating each
+ *    other. /write and /write/:id are SIBLING routes rendering the same element,
+ *    so moving between them RECONCILES rather than remounts: every ref below
+ *    survives, including one belonging to a PUT that is still in flight. The
+ *    document currently in the form is therefore identified by `sessionRef`
+ *    ('new' or the article id) and stamped with a monotonic `genRef`. Every
+ *    reset or load calls beginSession(), which bumps the generation and
+ *    abandons the timers and the save mutex. EVERY write-back that happens
+ *    after an `await` re-checks its captured generation first, so a save that
+ *    outlives its session can neither resurrect the old article id nor overwrite
+ *    the new story's baseline — it simply evaporates.
+ *
+ * 4. NOTHING LEAVES WITHOUT BEING WRITTEN. Publish drains the in-flight save
+ *    before it publishes (so it can never make an older version public) and
+ *    refuses rather than publishing a stale one. Unmount flushes a pending
+ *    debounce straight to the API instead of clearing the timer and losing the
+ *    last ~1.5s of typing. A story whose id could not be resolved renders a
+ *    recovery panel instead of a usable-but-unsaveable editor.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -88,12 +107,23 @@ export default function EditorPage() {
   const [savedAt, setSavedAt] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(''); // 'loading' | 'publishing' | 'cover' | ''
+  const [loadFailed, setLoadFailed] = useState(false);
   const [drafts, setDrafts] = useState(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
 
   const hydratedRef = useRef(false); // the form holds a real document
   const baselineRef = useRef(''); // signature of what the server already has
-  const savingRef = useRef(false);
+  const sessionRef = useRef(null); // which document the form holds: 'new' | '<id>'
+  /**
+   * The server-side identity of this document, updated SYNCHRONOUSLY the moment
+   * a response lands. `articleId` state is for rendering; React has not
+   * necessarily re-rendered yet when the next save or a publish reads it, and
+   * an id that is still null one microtask after the POST returned would make
+   * the next write POST a SECOND copy of the same story.
+   */
+  const identityRef = useRef({ id: null, slug: '', status: 'draft' });
+  const genRef = useRef(0); // bumped by beginSession(); stamps every save
+  const activeSaveRef = useRef(null); // the in-flight saveNow() promise, or null
   const rerunRef = useRef(false);
   const timerRef = useRef(null);
   const coverInputRef = useRef(null);
@@ -112,6 +142,46 @@ export default function EditorPage() {
       doc: snap.doc,
     });
 
+  const payloadOf = (snap) => ({
+    title: snap.title.trim() || 'Untitled',
+    subtitle: snap.subtitle.trim() || null,
+    contentJson: snap.doc,
+    contentHtml: snap.html,
+    coverUrl: snap.coverUrl || null,
+    tags: snap.tags,
+  });
+
+  const isUntouched = (snap) =>
+    !snap.title.trim() && !snap.subtitle.trim() && isEmptyDoc(snap.doc) && !snap.coverUrl;
+
+  /** What is on screen right now, with the identity the SERVER has agreed to. */
+  const snapshot = () => ({
+    ...stateRef.current,
+    articleId: identityRef.current.id,
+    slug: identityRef.current.slug,
+    status: identityRef.current.status,
+  });
+
+  /**
+   * Start a new editing session: the form is about to hold a DIFFERENT document.
+   *
+   * Bumping the generation is what makes every in-flight request harmless — its
+   * post-await write-backs all check `gen === genRef.current` and bail. Timers
+   * (including the rerun timer armed from saveNow's finally block, which lives
+   * outside React's effect lifecycle) are dropped here, and the save mutex is
+   * released so the new session can save immediately without waiting on a
+   * request that no longer has anywhere to land.
+   */
+  const beginSession = useCallback((key) => {
+    genRef.current += 1;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    rerunRef.current = false;
+    activeSaveRef.current = null;
+    sessionRef.current = key;
+    return genRef.current;
+  }, []);
+
   /* ------------------------------------------------------------- load --- */
 
   const adopt = useCallback((article) => {
@@ -125,6 +195,11 @@ export default function EditorPage() {
       tags: nextTags,
       doc: nextDoc,
     });
+    identityRef.current = {
+      id: article.id,
+      slug: article.slug || '',
+      status: article.status || 'draft',
+    };
     setArticleId(article.id);
     setSlug(article.slug || '');
     setStatus(article.status || 'draft');
@@ -138,119 +213,215 @@ export default function EditorPage() {
     setSaveState('idle');
   }, []);
 
+  const [reloadNonce, setReloadNonce] = useState(0);
+
   useEffect(() => {
     if (authLoading || !user) return undefined;
 
-    // New story — reset only when arriving from an existing one.
+    // Which document does the URL ask for? saveNow() moves sessionRef itself
+    // when a POST assigns an id, so the replace-navigate to /write/<newId> that
+    // follows is recognised as the SAME session and never reloads.
+    const wanted = routeId ? String(routeId) : 'new';
+    // Already holding it. hydratedRef is deliberately NOT set here — only a
+    // branch that actually put a document in the form may set it, so a failed
+    // load can never be re-enabled for saving by an unrelated re-render.
+    if (sessionRef.current === wanted) return undefined;
+
+    /* ------------------------------------------------ new, empty story --- */
     if (!routeId) {
-      if (articleId !== null) {
-        baselineRef.current = JSON.stringify({
-          title: '',
-          subtitle: '',
-          coverUrl: '',
-          tags: [],
-          doc: EMPTY_DOC,
-        });
-        setArticleId(null);
-        setSlug('');
-        setStatus('draft');
-        setTitle('');
-        setSubtitle('');
-        setCoverUrl('');
-        setTags([]);
-        setDoc(EMPTY_DOC);
-        setHtml('');
-        setSaveState('idle');
-      }
+      beginSession('new');
+      baselineRef.current = JSON.stringify({
+        title: '',
+        subtitle: '',
+        coverUrl: '',
+        tags: [],
+        doc: EMPTY_DOC,
+      });
+      identityRef.current = { id: null, slug: '', status: 'draft' };
+      setArticleId(null);
+      setSlug('');
+      setStatus('draft');
+      setTitle('');
+      setSubtitle('');
+      setCoverUrl('');
+      setTags([]);
+      setDoc(EMPTY_DOC);
+      setHtml('');
+      setSaveState('idle');
+      setSavedAt(null);
+      setError('');
+      setLoadFailed(false);
+      // A load may have been abandoned mid-flight to get here. Clearing busy
+      // unconditionally is what stops 'loading' sticking forever and silently
+      // disabling autosave for the rest of the session.
+      setBusy((prev) => (prev === 'loading' ? '' : prev));
       hydratedRef.current = true;
       return undefined;
     }
 
-    if (articleId !== null && String(articleId) === String(routeId)) {
-      hydratedRef.current = true;
-      return undefined;
-    }
-
+    /* -------------------------------------------- resume an existing one --- */
+    const gen = beginSession(wanted);
     let cancelled = false;
     hydratedRef.current = false;
     setBusy('loading');
     setError('');
+    setLoadFailed(false);
     (async () => {
       try {
         const article = await fetchArticleById(routeId, user.username);
-        if (cancelled) return;
+        if (cancelled || gen !== genRef.current) return;
         adopt(article);
         hydratedRef.current = true;
+        setBusy('');
       } catch (err) {
-        if (!cancelled) setError(err?.message || 'Could not open that story.');
-      } finally {
-        if (!cancelled) setBusy('');
+        if (cancelled || gen !== genRef.current) return;
+        // The form stays unhydrated, so nothing can be saved — say so loudly
+        // and render the recovery panel instead of an editor that swallows
+        // everything typed into it.
+        setError(err?.message || 'Could not open that story.');
+        setLoadFailed(true);
+        setBusy('');
       }
     })();
     return () => {
       cancelled = true;
+      // Release the claim if we are leaving before the document actually
+      // arrived, so the next run re-fetches instead of early-returning on a
+      // session that holds nothing. StrictMode double-invokes this effect in
+      // development, so without it /write/:id would never load at all there.
+      if (!hydratedRef.current && sessionRef.current === wanted) sessionRef.current = null;
     };
-    // articleId is intentionally read, not tracked — a save that assigns the id
-    // must not re-trigger a load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeId, authLoading, user, adopt]);
+  }, [routeId, authLoading, user, adopt, beginSession, reloadNonce]);
 
   /* ------------------------------------------------------------- save --- */
 
-  const saveNow = useCallback(async () => {
-    const snap = stateRef.current;
-    if (!user || !hydratedRef.current) return null;
+  /**
+   * One save round-trip, stamped with the generation it was started in.
+   *
+   * EVERY write-back below the await is gated on that stamp. If the writer left
+   * for another story while this request was in flight, the response is dropped
+   * on the floor: the old article id is not restored, the new story's baseline
+   * is not overwritten with the old story's content, and the mutex/timers left
+   * behind by beginSession() are not disturbed.
+   */
+  const runSave = useCallback(
+    async (gen, snap) => {
+      setSaveState('saving');
+      setError('');
+      const payload = payloadOf(snap);
 
-    const untouched = !snap.title.trim() && !snap.subtitle.trim() && isEmptyDoc(snap.doc) && !snap.coverUrl;
-    if (!snap.articleId && untouched) return null;
+      try {
+        const saved = snap.articleId
+          ? await api.put(`/api/articles/${snap.articleId}`, payload)
+          : await api.post('/api/articles', payload);
 
-    if (savingRef.current) {
-      rerunRef.current = true;
-      return null;
-    }
+        if (gen !== genRef.current) return null; // stale session — discard
 
-    savingRef.current = true;
-    setSaveState('saving');
-    setError('');
+        // Baseline is the snapshot that was SENT — anything typed while the
+        // request was in flight still counts as unsaved and reschedules itself.
+        baselineRef.current = signatureOf(snap);
+        identityRef.current = {
+          id: saved.id,
+          slug: saved.slug || '',
+          status: saved.status || 'draft',
+        };
+        setArticleId(saved.id);
+        setSlug(saved.slug || '');
+        setStatus(saved.status || 'draft');
+        setSavedAt(new Date());
+        setSaveState('saved');
 
-    const payload = {
-      title: snap.title.trim() || 'Untitled',
-      subtitle: snap.subtitle.trim() || null,
-      contentJson: snap.doc,
-      contentHtml: snap.html,
-      coverUrl: snap.coverUrl || null,
-      tags: snap.tags,
-    };
-
-    try {
-      const saved = snap.articleId
-        ? await api.put(`/api/articles/${snap.articleId}`, payload)
-        : await api.post('/api/articles', payload);
-
-      // Baseline is the snapshot that was SENT — anything typed while the
-      // request was in flight still counts as unsaved and reschedules itself.
-      baselineRef.current = signatureOf(snap);
-      setArticleId(saved.id);
-      setSlug(saved.slug || '');
-      setStatus(saved.status || 'draft');
-      setSavedAt(new Date());
-      setSaveState('saved');
-
-      if (!snap.articleId) navigate(`/write/${saved.id}`, { replace: true });
-      return saved;
-    } catch (err) {
-      setSaveState('error');
-      setError(err?.message || 'Could not save that. Your text is still here — try again.');
-      return null;
-    } finally {
-      savingRef.current = false;
-      if (rerunRef.current) {
-        rerunRef.current = false;
-        clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => saveNow(), AUTOSAVE_MS);
+        if (!snap.articleId) {
+          // The POST just gave this session an identity. Claim it BEFORE the
+          // navigate so the load effect recognises /write/<id> as the session
+          // it is already holding and does not re-fetch it.
+          sessionRef.current = String(saved.id);
+          navigate(`/write/${saved.id}`, { replace: true });
+        }
+        return saved;
+      } catch (err) {
+        if (gen !== genRef.current) return null;
+        setSaveState('error');
+        setError(err?.message || 'Could not save that. Your text is still here — try again.');
+        return null;
+      } finally {
+        if (gen === genRef.current && rerunRef.current) {
+          // Something changed while the request was in flight. Re-arm — but the
+          // timer fires outside React's effect lifecycle, so it re-checks the
+          // generation itself rather than trusting that it still exists.
+          rerunRef.current = false;
+          clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => {
+            if (gen === genRef.current) saveNowRef.current?.();
+          }, AUTOSAVE_MS);
+        }
       }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigate],
+  );
+
+  /** The save mutex. A second caller marks a rerun and awaits the first. */
+  const saveNow = useCallback(() => {
+    const snap = snapshot();
+    if (!user || !hydratedRef.current) return Promise.resolve(null);
+    if (!snap.articleId && isUntouched(snap)) return Promise.resolve(null);
+
+    if (activeSaveRef.current) {
+      rerunRef.current = true;
+      return activeSaveRef.current;
     }
-  }, [navigate, user]);
+
+    const gen = genRef.current;
+    const promise = runSave(gen, snap).finally(() => {
+      if (activeSaveRef.current === promise) activeSaveRef.current = null;
+    });
+    activeSaveRef.current = promise;
+    return promise;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runSave, user]);
+
+  const saveNowRef = useRef(saveNow);
+  saveNowRef.current = saveNow;
+
+  /**
+   * Persist everything on screen and only then hand back the identity.
+   *
+   * Publishing used to call saveNow() and, if a save was already in flight, get
+   * null back from the mutex and quietly publish the OLDER version. This drains
+   * the in-flight request first, then saves whatever is left dirty, so the
+   * caller either gets an id whose server state matches the screen or nothing.
+   */
+  const flushSave = useCallback(async () => {
+    const gen = genRef.current;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+
+    for (let pass = 0; pass < 5; pass += 1) {
+      if (gen !== genRef.current) return null;
+
+      if (activeSaveRef.current) {
+        rerunRef.current = false; // this flush supersedes the scheduled rerun
+        await activeSaveRef.current;
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+        rerunRef.current = false;
+        continue;
+      }
+
+      const snap = snapshot();
+      if (signatureOf(snap) === baselineRef.current) {
+        return snap.articleId
+          ? { id: snap.articleId, slug: snap.slug, status: snap.status }
+          : null;
+      }
+
+      const saved = await saveNow();
+      if (gen !== genRef.current) return null;
+      if (!saved) return null; // the save failed — the caller must not proceed
+    }
+    return null;
+  }, [saveNow]);
 
   /* Debounced autosave on any change to the story. */
   useEffect(() => {
@@ -262,11 +433,40 @@ export default function EditorPage() {
     }
     setSaveState((prev) => (prev === 'saving' ? prev : 'dirty'));
     clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => saveNow(), AUTOSAVE_MS);
+    const gen = genRef.current;
+    timerRef.current = setTimeout(() => {
+      if (gen === genRef.current) saveNow();
+    }, AUTOSAVE_MS);
     return () => clearTimeout(timerRef.current);
   }, [title, subtitle, coverUrl, tags, doc, html, authLoading, user, busy, saveNow]);
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  /**
+   * Unmount: FLUSH, don't just cancel.
+   *
+   * Clearing the debounce on the way out threw away everything typed in the
+   * last ~1.5s — including, after a publish, the edits made while the publish
+   * request was in flight. There is no component left to update, so this writes
+   * straight to the API and reports nothing.
+   */
+  useEffect(
+    () => () => {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      const snap = snapshot();
+      if (!hydratedRef.current) return;
+      // A request already on the wire carries this content; firing a second one
+      // would race it and could duplicate a brand-new story.
+      if (activeSaveRef.current) return;
+      if (signatureOf(snap) === baselineRef.current) return;
+      if (!snap.articleId && isUntouched(snap)) return;
+      const payload = payloadOf(snap);
+      const write = snap.articleId
+        ? api.put(`/api/articles/${snap.articleId}`, payload)
+        : api.post('/api/articles', payload);
+      write.catch(() => {});
+    },
+    [],
+  );
 
   const onEditorChange = useCallback(({ json, html: nextHtml }) => {
     setDoc(json);
@@ -276,29 +476,63 @@ export default function EditorPage() {
   /* ---------------------------------------------------------- actions --- */
 
   const publish = async () => {
+    const gen = genRef.current;
     setBusy('publishing');
     setError('');
     try {
-      clearTimeout(timerRef.current);
-      const saved = (await saveNow()) || { id: articleId, slug };
-      const targetId = saved?.id || articleId;
-      if (!targetId) throw new Error('Write something first — there is nothing to publish yet.');
-      const published = await api.post(`/api/articles/${targetId}/publish`);
+      // Everything on screen must be on the server BEFORE we make it public —
+      // no falling back to a half-saved id and publishing an older version.
+      const saved = await flushSave();
+      if (gen !== genRef.current) return;
+
+      if (!saved?.id) {
+        if (isUntouched(stateRef.current) && !identityRef.current.id) {
+          throw new Error('Write something first — there is nothing to publish yet.');
+        }
+        throw new Error(
+          'Your latest edits have not saved yet, so publishing would put an older version live. Nothing was published — try again in a moment.',
+        );
+      }
+      // Belt and braces: if anything changed between the flush and here, do not
+      // publish a version the writer can no longer see on screen.
+      if (signatureOf(stateRef.current) !== baselineRef.current) {
+        throw new Error(
+          'You kept typing while that was saving. Nothing was published — give it a second and press Publish again.',
+        );
+      }
+
+      const published = await api.post(`/api/articles/${saved.id}/publish`);
+      if (gen !== genRef.current) return;
+      identityRef.current = {
+        ...identityRef.current,
+        slug: published.slug,
+        status: published.status,
+      };
       setStatus(published.status);
       setSlug(published.slug);
       navigate(`/article/${published.slug}`);
     } catch (err) {
-      setError(err?.message || 'Publishing failed.');
+      if (gen === genRef.current) setError(err?.message || 'Publishing failed.');
     } finally {
-      setBusy('');
+      if (gen === genRef.current) setBusy('');
     }
   };
 
+  /** Re-attempt a load that failed — the session is released so it re-runs. */
+  const retryLoad = () => {
+    sessionRef.current = null;
+    setLoadFailed(false);
+    setError('');
+    setReloadNonce((n) => n + 1);
+  };
+
   const unpublish = async () => {
+    if (!articleId) return;
     setBusy('publishing');
     setError('');
     try {
       const updated = await api.post(`/api/articles/${articleId}/unpublish`);
+      identityRef.current = { ...identityRef.current, status: updated.status };
       setStatus(updated.status);
     } catch (err) {
       setError(err?.message || 'Could not unpublish that story.');
@@ -362,6 +596,33 @@ export default function EditorPage() {
       <div className="container section text-center muted" role="status">
         <span className="spinner" aria-hidden="true" style={{ margin: '0 auto' }} />
         <span className="sr-only">Loading your session</span>
+      </div>
+    );
+  }
+
+  /**
+   * The story behind /write/:id could not be opened, so the form was never
+   * hydrated and NOTHING typed here could ever be saved. Showing a working
+   * editor would be a trap — the status would read "Draft" while every
+   * keystroke went nowhere. Offer the two ways out instead.
+   */
+  if (loadFailed) {
+    return (
+      <div className="container section mi-write-recover" data-page="editor">
+        <p className="eyebrow">Story unavailable</p>
+        <h1 className="h2">That story could not be opened</h1>
+        <p className="muted" role="alert">
+          {error || 'It may have been deleted, or it belongs to another writer.'}{' '}
+          Nothing you type here would be saved, so the editor is closed.
+        </p>
+        <div className="cluster" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
+          <button type="button" className="btn btn-primary" onClick={retryLoad}>
+            Try again
+          </button>
+          <Link className="btn btn-ghost" to="/write">
+            Start a new story
+          </Link>
+        </div>
       </div>
     );
   }
@@ -441,7 +702,12 @@ export default function EditorPage() {
         ) : null}
       </header>
 
-      <main className="mi-write-canvas">
+      {/* Inert while a story is still being fetched: the form is not hydrated
+          yet, so anything typed now would be discarded by adopt(). */}
+      <main
+        className={`mi-write-canvas${busy === 'loading' ? ' is-loading' : ''}`}
+        aria-busy={busy === 'loading'}
+      >
         {error ? (
           <div className="alert alert-error" role="alert">
             {error}

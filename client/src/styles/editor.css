@@ -116,6 +116,24 @@
   margin-top: var(--space-4);
 }
 
+/* A story is still being fetched — the form is not hydrated, so keystrokes
+   would be thrown away by the load that is about to land. Make it inert. */
+.mi-write-canvas.is-loading {
+  opacity: 0.45;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* /write/:id could not be resolved. The editor is replaced by a way out. */
+.mi-write-recover {
+  max-width: calc(var(--measure) + 2 * var(--space-6));
+  text-align: center;
+}
+
+.mi-write-recover .cluster {
+  justify-content: center;
+}
+
 .mi-cover-shell {
   position: relative;
   border-radius: var(--radius-lg);

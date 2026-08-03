@@ -10,7 +10,7 @@
  * render as a styled link card. No third-party script is loaded — the reader
  * page stays fast and works offline for everything but the iframe itself.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 
@@ -119,6 +119,16 @@ function EmbedView({ node, updateAttributes, deleteNode, editor, selected }) {
   const editable = editor.isEditable;
   const [draft, setDraft] = useState(url || '');
   const [editing, setEditing] = useState(!url);
+
+  // The URL can change underneath this view without the input knowing —
+  // undo/redo rewrites node.attrs directly. Resync so "Change URL" does not
+  // re-apply the value the writer just undid.
+  const seenUrlRef = useRef(url || '');
+  if (seenUrlRef.current !== (url || '')) {
+    seenUrlRef.current = url || '';
+    setDraft(url || '');
+    setEditing(!url);
+  }
 
   if (!editable) {
     return (

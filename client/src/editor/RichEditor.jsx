@@ -63,7 +63,15 @@ export default function RichEditor({ value, onChange, autofocus = false, classNa
       buildExtensions({
         editable: true,
         onImageUploading: setUploading,
-        onImageUploadError: (err) => setUploadError(err?.message || 'That upload failed.'),
+        // `count` > 1 means several files in one drop failed; the rest of the
+        // batch was still inserted, so name the number rather than implying
+        // the whole drop was lost.
+        onImageUploadError: (err, count = 1) =>
+          setUploadError(
+            count > 1
+              ? `${count} images would not upload (${err?.message || 'upload failed'}) — the others are in.`
+              : err?.message || 'That upload failed.',
+          ),
       }),
     [],
   );

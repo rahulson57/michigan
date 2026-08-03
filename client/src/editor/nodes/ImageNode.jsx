@@ -164,32 +164,49 @@ function blockInsertPos(state) {
 }
 
 
-/** Upload every image file in `files` and insert them at `pos`. */
+/**
+ * Upload every image file in `files` and insert them at `pos`.
+ *
+ * Two things this has to get right for a multi-file drop:
+ *  • ORDER. Each insert advances the cursor past the node it just added,
+ *    otherwise every image lands at the same position and the batch ends up
+ *    reversed.
+ *  • INDEPENDENCE. One rejected file (too large, wrong type, flaky network)
+ *    must not abandon the ones behind it, so each upload gets its own try.
+ */
 async function insertUploads(view, files, pos, options) {
   const images = Array.from(files || []).filter((file) => file.type?.startsWith('image/'));
   if (!images.length) return false;
 
   options.onUploading?.(true);
+  const failures = [];
+  let at = pos;
   try {
     for (const file of images) {
-      // eslint-disable-next-line no-await-in-loop
-      const url = await uploadImage(file);
+      let url;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        url = await uploadImage(file);
+      } catch (err) {
+        failures.push(err);
+        continue;
+      }
       const { state } = view;
       const type = state.schema.nodes.image;
       if (!type) break;
-      const at = Math.min(pos ?? state.selection.to, state.doc.content.size);
+      const insertAt = Math.min(at ?? state.selection.to, state.doc.content.size);
       const node = type.create({
         src: url,
         alt: file.name.replace(/\.[^.]+$/, ''),
         width: 'wide',
         caption: '',
       });
-      view.dispatch(state.tr.insert(at, node).scrollIntoView());
+      view.dispatch(state.tr.insert(insertAt, node).scrollIntoView());
+      at = insertAt + node.nodeSize; // keep the batch in the order it was dropped
     }
-  } catch (err) {
-    options.onUploadError?.(err);
   } finally {
     options.onUploading?.(false);
+    if (failures.length) options.onUploadError?.(failures[0], failures.length);
   }
   return true;
 }
@@ -248,7 +265,11 @@ export const ImageNode = Image.extend({
           };
         },
       },
-      { tag: 'img[src]' },
+      // This overrides the base extension's parseHTML entirely, so
+      // `allowBase64` has to be honoured HERE or the option is dead: with it
+      // off, a pasted data: URI is dropped rather than inlined into the
+      // document (and from there into every autosave payload).
+      { tag: this.options.allowBase64 ? 'img[src]' : 'img[src]:not([src^="data:"])' },
     ];
   },
 
