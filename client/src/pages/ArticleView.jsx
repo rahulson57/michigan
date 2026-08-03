@@ -83,6 +83,32 @@ function NotFoundState({ message }) {
   );
 }
 
+/**
+ * The story exists as far as we know — we just could not fetch it. This is NOT the
+ * 404 above: a dropped connection (ApiError status 0) or a 5xx must not tell the
+ * reader the story was unpublished, because that is a claim about the content rather
+ * than about the request, and it offers no way forward. Retrying is the useful action.
+ */
+function LoadErrorState({ message, onRetry }) {
+  return (
+    <div className="container-narrow section stack text-center">
+      <p className="eyebrow">Something went wrong</p>
+      <h1 className="page-title">We couldn&apos;t load this story.</h1>
+      <p className="muted">
+        {message || 'The request did not go through. The story itself is probably fine.'}
+      </p>
+      <div className="cluster" style={{ justifyContent: 'center' }}>
+        <button type="button" className="btn btn-primary" onClick={onRetry}>
+          Try again
+        </button>
+        <Link className="btn" to="/">
+          Back to the home feed
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /** Full-bleed cover that removes itself if the image fails to load. */
 function Cover({ url, alt }) {
   const [failed, setFailed] = useState(false);
@@ -145,6 +171,8 @@ export default function ArticleView() {
   const [status, setStatus] = useState('loading'); // loading | ready | missing | error
   const [error, setError] = useState(null);
   const [more, setMore] = useState([]);
+  // Bumped by "Try again" so a failed fetch can be retried without a page reload.
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -174,7 +202,7 @@ export default function ArticleView() {
     return () => {
       alive = false;
     };
-  }, [slug]);
+  }, [slug, reloadToken]);
 
   // "More from <author>" — fetched once the article (and so the author) is known.
   const authorUsername = article?.author?.username;
@@ -198,8 +226,13 @@ export default function ArticleView() {
   }, [authorUsername, article?.id]);
 
   if (status === 'loading') return <ReaderSkeleton />;
+  // Only a real 404 from the API renders the "no such story" page. Everything else —
+  // offline (ApiError status 0), a 5xx, a proxy hiccup — is a transport failure and
+  // gets a retry instead of a verdict about the article.
   if (status === 'missing') return <NotFoundState />;
-  if (status === 'error') return <NotFoundState message={error} />;
+  if (status === 'error') {
+    return <LoadErrorState message={error} onRetry={() => setReloadToken((n) => n + 1)} />;
+  }
   if (!article) return <NotFoundState />;
 
   const isDraft = article.status !== 'published';

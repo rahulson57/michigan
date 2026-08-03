@@ -76,6 +76,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  // Bumped by "Try again" so a failed load can be retried without a page reload.
+  const [reloadToken, setReloadToken] = useState(0);
 
   // Guards against out-of-order replies when the tab or tag changes mid-flight.
   const requestSeq = useRef(0);
@@ -101,7 +103,9 @@ export default function Home() {
         setTotal(0);
         setLoading(false);
       });
-  }, [sort, tag]);
+  }, [sort, tag, reloadToken]);
+
+  const retry = useCallback(() => setReloadToken((n) => n + 1), []);
 
   const loadMore = useCallback(() => {
     if (loadingMore || loading) return;
@@ -119,11 +123,17 @@ export default function Home() {
           return [...prev, ...next.filter((a) => !seen.has(a.id))];
         });
         setTotal(Number(data?.total || 0));
-        setLoadingMore(false);
       })
       .catch((err) => {
         if (seq !== requestSeq.current) return;
         setError(err?.message || 'Could not load more stories.');
+      })
+      .finally(() => {
+        // Deliberately NOT gated on `seq`. Releasing the button is bookkeeping for
+        // *this* request, not for the reply's contents: if a stale page-2 reply
+        // returned before clearing the flag, `loadingMore` would stay true forever
+        // (switch tab or tag while "Load more" is in flight) and both the button and
+        // the guard above would block every further page until Home remounts.
         setLoadingMore(false);
       });
   }, [items.length, loading, loadingMore, sort, tag]);
@@ -185,9 +195,12 @@ export default function Home() {
         </div>
 
         {error && (
-          <p className="alert alert-error" role="alert">
-            {error}
-          </p>
+          <div className="alert alert-error feed-alert" role="alert">
+            <span>{error}</span>{' '}
+            <button type="button" className="btn btn-sm" onClick={retry}>
+              Try again
+            </button>
+          </div>
         )}
 
         {loading ? (
@@ -199,6 +212,15 @@ export default function Home() {
               Loading stories
             </span>
           </div>
+        ) : items.length === 0 && error ? (
+          /*
+            A FAILED load is not an empty feed. `items` is cleared on error so the
+            previous ranking cannot linger, which would otherwise fall through to the
+            "quiet right now" copy and tell the reader the site has no stories when in
+            fact the request never landed. The banner above already says what went
+            wrong and offers a retry, so this branch stays deliberately silent.
+          */
+          null
         ) : items.length === 0 ? (
           <div className="empty">
             <p className="card-title">

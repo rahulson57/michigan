@@ -17,8 +17,9 @@
  * `GET /api/articles` returns ArticleSummary, which by frozen contract carries
  * no `tags` array (only ArticleFull does). There is no `/api/tags` endpoint, so
  * the vocabulary here is harvested by reading a bounded sample of articles in
- * full, once per page load, and counting their tags. Results are memoised at
- * module scope so navigating back to the feed does not refetch.
+ * full, once per page load, and counting their tags. SUCCESSFUL results are
+ * memoised at module scope so navigating back to the feed does not refetch; a
+ * failed run is never cached, so a remount (or "Try again") really does retry.
  *
  * A `GET /api/tags` endpoint returning `{name, count}[]` would replace this
  * entirely; it has been flagged to the coordinator as a follow-up rather than
@@ -43,6 +44,17 @@ async function fetchTrending() {
   return trendingCache;
 }
 
+/**
+ * Harvest the topic vocabulary.
+ *
+ * The sub-requests are individually tolerant — losing one of the two rankings, or a
+ * few of the sampled bodies, still yields a usable cloud. But a run in which NOTHING
+ * came back is a failure, not an empty vocabulary, and it must throw rather than
+ * return `[]`: `topicCache` lives at module scope for the whole tab, so memoising a
+ * transient blip would pin an empty topic rail until a hard reload and remounting
+ * would never retry. Only a result actually derived from live data is cached — a
+ * genuinely tagless corpus caches `[]`, which is a real answer.
+ */
 async function fetchTopics() {
   if (topicCache) return topicCache;
 
@@ -52,6 +64,10 @@ async function fetchTopics() {
     api.get('/api/articles?sort=recent&limit=8&offset=0').catch(() => null),
   ]);
 
+  if (!top && !recent) {
+    throw new Error('Could not reach the server while loading topics.');
+  }
+
   const slugs = [];
   for (const list of [top, recent]) {
     for (const article of list?.articles || []) {
@@ -59,11 +75,18 @@ async function fetchTopics() {
     }
   }
 
-  const sampled = await Promise.all(
-    slugs.slice(0, TOPIC_SAMPLE).map((slug) =>
-      api.get(`/api/articles/${encodeURIComponent(slug)}`).catch(() => null),
-    ),
-  );
+  const wanted = slugs.slice(0, TOPIC_SAMPLE);
+  const sampled = (
+    await Promise.all(
+      wanted.map((slug) =>
+        api.get(`/api/articles/${encodeURIComponent(slug)}`).catch(() => null),
+      ),
+    )
+  ).filter(Boolean);
+
+  if (wanted.length > 0 && sampled.length === 0) {
+    throw new Error('Could not read any stories while loading topics.');
+  }
 
   const counts = new Map();
   for (const article of sampled) {
@@ -72,6 +95,7 @@ async function fetchTopics() {
     }
   }
 
+  // Assigned only once the result is known to come from real data (see docblock).
   topicCache = [...counts.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
@@ -100,21 +124,30 @@ function TrendingRow({ article, index }) {
 }
 
 export default function Sidebar({ activeTag = null, onSelectTag = () => {} }) {
+  // `null` = still loading, `[]` = genuinely empty, `false` = the request failed.
   const [trending, setTrending] = useState(null);
   const [topics, setTopics] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let alive = true;
     fetchTrending()
       .then((list) => alive && setTrending(list))
-      .catch(() => alive && setTrending([]));
+      .catch(() => alive && setTrending(false));
     fetchTopics()
       .then((list) => alive && setTopics(list))
-      .catch(() => alive && setTopics([]));
+      .catch(() => alive && setTopics(false));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadToken]);
+
+  // Neither cache holds a failed run, so re-running the effect genuinely refetches.
+  const retry = () => {
+    setTrending(null);
+    setTopics(null);
+    setReloadToken((n) => n + 1);
+  };
 
   return (
     <aside className="feed-rail" aria-label="Trending and topics">
@@ -129,6 +162,13 @@ export default function Sidebar({ activeTag = null, onSelectTag = () => {} }) {
                 </li>
               ))}
             </ul>
+          ) : trending === false ? (
+            <p className="meta">
+              Couldn&apos;t load what&apos;s trending.{' '}
+              <button type="button" className="link-inline" onClick={retry}>
+                Try again
+              </button>
+            </p>
           ) : trending.length === 0 ? (
             <p className="meta">Nothing trending yet.</p>
           ) : (
@@ -153,6 +193,13 @@ export default function Sidebar({ activeTag = null, onSelectTag = () => {} }) {
                 <span key={i} className="skeleton sk-chip" style={{ width }} />
               ))}
             </div>
+          ) : topics === false ? (
+            <p className="meta">
+              Couldn&apos;t load topics.{' '}
+              <button type="button" className="link-inline" onClick={retry}>
+                Try again
+              </button>
+            </p>
           ) : topics.length === 0 ? (
             <p className="meta">No topics yet.</p>
           ) : (
