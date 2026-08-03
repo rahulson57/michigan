@@ -36,15 +36,16 @@ function NotFound() {
  *
  * ⚠️ READ THIS BEFORE TOUCHING THE PROFILE ROUTE. React Router v6 only turns
  * `:name` into a parameter when the colon immediately follows a slash — its
- * path compiler matches on /\/:([\w-]+)/. That means `path="/@:username"` is
- * NOT a dynamic route: it compiles to the literal string "/@:username",
- * silently never matches, and every profile link falls through to the `*`
- * NotFound route. No warning is emitted.
+ * path compiler matches on /\/:([\w-]+)/. A route pattern of `/@:username` is
+ * therefore NOT dynamic: it compiles to that literal string, silently never
+ * matches, and every profile link falls through to the `*` NotFound route.
+ * No warning is emitted. `npm run check:routes` now fails the build on any
+ * colon in a route pattern that is not preceded by a slash (DEC-146).
  *
- * So the route is declared as `/:username` — a whole dynamic segment — and the
- * captured value KEEPS its leading "@" (e.g. "@ada"). `stripHandle()` turns it
- * back into a bare username. Static routes (`/login`, `/write`, `/leaderboard`,
- * …) still win because v6 ranks static segments above dynamic ones.
+ * So the route below is a whole dynamic segment, `/:handle`, and the captured
+ * value KEEPS its leading "@" (e.g. "@ada"). `stripHandle()` turns it back into
+ * a bare username. Static routes (`/login`, `/write`, `/leaderboard`, …) still
+ * win because v6 ranks static segments above dynamic ones.
  *
  * The param is deliberately named `handle` (not `username`) because its value
  * still has the "@" on it — Profile.jsx receives the STRIPPED value as a
