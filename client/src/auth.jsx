@@ -1,11 +1,13 @@
 /**
  * Session state for michigan.
  *
- *   const { user, token, login, register, logout, refresh, updateUser } = useAuth();
+ *   const { user, token, loading, login, register, logout, refresh, updateUser } = useAuth();
  *
  * `user` is a UserPublic object or null. `loading` is true only during the
  * initial hydration from localStorage — guard redirects on it so a refresh
- * does not bounce a signed-in reader to /login.
+ * does not bounce a signed-in reader to /login. `loading` is part of the
+ * ratified contract (DEC-146); the hydration guard cannot be written without
+ * it, so do not drop it from this return shape.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
@@ -31,10 +33,18 @@ export function AuthProvider({ children }) {
       return null;
     }
     try {
-      const { user: fresh } = await api.get('/api/auth/me');
+      const data = await api.get('/api/auth/me');
+      const fresh = (data && data.user) || null;
+      // A 2xx with no user in the body is a transient blip (proxy hiccup, empty
+      // response), NOT a sign-out. Blanking `user` here would log out a reader
+      // who still holds a perfectly valid token, so keep the cached session.
+      if (!fresh) return null;
       setUser(fresh);
       return fresh;
     } catch (err) {
+      // Only an explicit 401 — the server rejecting the token — ends the
+      // session. Network failures, timeouts and 5xx leave both the token and
+      // the cached user intact so a flaky moment can't sign anyone out.
       if (err.status === 401) applySession(null, null);
       return null;
     }

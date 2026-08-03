@@ -17,11 +17,19 @@ import { toUserPublic, optionalAuth } from '../auth.js';
 
 const router = express.Router();
 
+/**
+ * Client profile URLs are `/@ada`, and React Router hands the page the param
+ * with its leading "@" still attached (see client/src/App.jsx). Tolerate it
+ * here so `/api/profiles/ada` and `/api/profiles/@ada` both resolve — keep
+ * this when you take the file over.
+ */
+export const normalizeUsername = (value) => String(value ?? '').replace(/^@+/, '');
+
 // GET /api/profiles/:username -> {user: UserPublic}
 router.get('/profiles/:username', optionalAuth, (req, res) => {
   const user = db
     .prepare('SELECT * FROM users WHERE lower(username) = lower(?)')
-    .get(String(req.params.username));
+    .get(normalizeUsername(req.params.username));
   if (!user) return res.status(404).json({ error: 'User not found' });
   return res.json({ user: toUserPublic(user) });
 });

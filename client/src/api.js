@@ -103,4 +103,24 @@ export async function uploadImage(file) {
   return url;
 }
 
+/* ------------------------------------------------------------------ *
+ * Routing helpers — profile handles
+ *
+ * Profile URLs are Medium-style: `/@ada`. The router declares that route as
+ * `/:username` (React Router v6 only captures a parameter when the colon
+ * follows a slash, so `/@:username` would silently never match), which means
+ * the captured param still carries its leading "@". Use these two helpers on
+ * both sides so the "@" is handled in exactly one place.
+ * ------------------------------------------------------------------ */
+
+/** "@ada" | "ada" -> "ada". Safe on null/undefined. */
+export function stripHandle(value) {
+  return String(value ?? '').replace(/^@+/, '');
+}
+
+/** "ada" | "@ada" -> "/@ada" — the canonical link target for a profile. */
+export function profilePath(username) {
+  return `/@${encodeURIComponent(stripHandle(username))}`;
+}
+
 export default api;

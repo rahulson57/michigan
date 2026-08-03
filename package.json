@@ -16,7 +16,9 @@
     "dev:server": "node server/index.js",
     "dev:client": "npm --workspace client run dev",
     "seed": "node server/seed.js",
-    "build": "npm --workspace client run build",
+    "build": "npm run check:routes && npm --workspace client run build",
+    "check:routes": "node client/scripts/check-routes.mjs",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
     "setup": "npm install && npm run seed",
     "start": "node server/index.js"
   },
