@@ -1,0 +1,646 @@
+/* ==========================================================================
+   michigan — feed & reader
+   --------------------------------------------------------------------------
+   Component styles for the home feed, the article card, the trending rail and
+   the reading view. Everything here is built out of the tokens and primitives
+   in global.css — no new colours, no new type scale, no new spacing values.
+
+   Owned by the home-feed / article-reader task. Imported by the components that
+   need it (Vite dedupes), so it ships only where it is used.
+
+   Contents
+     1. Author chip & avatars
+     2. Article card          .acard
+     3. Action slots          .acard-actions, [data-slot="article-actions"]
+     4. Home feed             .feed-*
+     5. Trending rail         .feed-rail .trend-*
+     6. Reader                .reader-*
+     7. Skeletons             .sk-*
+   ========================================================================== */
+
+/* ------------------------ 1. Author chip & avatars ----------------------- */
+
+.author-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.author-chip-avatar {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.author-chip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.author-chip-inline .author-chip-text {
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.author-chip-name {
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.author-chip-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  line-height: 1.35;
+}
+
+/* Monogram stand-in for a missing or broken avatar — never a broken image. */
+.avatar-monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  user-select: none;
+}
+
+/* -------------------------- 2. Article card ------------------------------ */
+
+.acard {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.acard-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The byline and the action row sit above the stretched title link so their
+   own links and buttons stay clickable. */
+.acard-head,
+.acard-foot,
+.acard-tags {
+  position: relative;
+  z-index: 1;
+}
+
+.acard-head {
+  align-self: start;
+}
+
+.acard-title {
+  margin: 0;
+}
+
+.acard-link {
+  color: inherit;
+  transition: color var(--transition);
+}
+
+/* Stretched link: the whole card is one click target, one tab stop. */
+.acard-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+}
+
+.acard:hover .acard-link {
+  color: var(--accent-hover);
+}
+
+.acard-excerpt {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--step-1);
+  line-height: 1.55;
+  color: var(--text-soft);
+  text-wrap: pretty;
+}
+
+.acard-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.acard-draft {
+  margin-left: var(--space-2);
+}
+
+/* Cover — a right-hand thumbnail, Medium style. Absent covers render nothing. */
+.acard-cover,
+.acard-thumb {
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
+}
+
+.acard-cover {
+  width: 190px;
+  aspect-ratio: 3 / 2;
+}
+
+.acard-thumb {
+  width: 80px;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+}
+
+.acard-cover img,
+.acard-thumb img,
+.acard-cover .skeleton,
+.acard-thumb .skeleton {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- compact & rank variants --- */
+
+.acard-compact,
+.acard-rank {
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.acard-title-sm {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--step-1);
+  font-weight: 700;
+  line-height: var(--leading-snug);
+  letter-spacing: -0.01em;
+}
+
+.acard-compact .acard-body,
+.acard-rank .acard-body {
+  gap: var(--space-2);
+}
+
+.acard-densemeta {
+  margin: 0;
+}
+
+.acard-rank {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.acard-ordinal {
+  align-self: center;
+  font-family: var(--font-serif);
+  font-size: var(--step-4);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--border-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------- 3. Action slots ------------------------------ */
+/* Holes that the engagement task's bar is dropped into by the integration task
+   (DEC-147). Both collapse to nothing while empty, so an un-wired card or
+   reading bar shows no stray gap. Nothing here assumes anything about the
+   markup that eventually lands inside them beyond "it is inline content". */
+
+.acard-actions,
+.reader-actionbar-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.acard-actions:empty,
+[data-slot="article-actions"]:empty {
+  display: none;
+}
+
+/* With no actions and no tags the footer row has no children at all — collapse
+   it rather than leaving its gap and top margin behind. */
+.acard-foot:empty {
+  display: none;
+}
+
+/* --------------------------- 4. Home feed -------------------------------- */
+
+.feed-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7);
+  padding-block: var(--space-4) var(--space-8);
+}
+
+.feed-main {
+  min-width: 0;
+}
+
+.feed-head .page-title {
+  max-width: 16ch;
+}
+
+.feed-head .lede {
+  max-width: 52ch;
+}
+
+.feed-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.feed-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.feed-tab {
+  padding: 0 0 var(--space-3);
+  margin-bottom: calc(-1 * var(--space-2) - 1px);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.feed-tab:hover {
+  color: var(--text);
+}
+
+.feed-tab.is-active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.tag-button {
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.tag-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.tag-button.is-active:hover {
+  background: var(--accent-hover);
+  color: var(--accent-ink);
+}
+
+/* Rows separated by hairlines rather than boxed cards — a quieter list. */
+.feed-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.feed-list > .acard {
+  padding-block: var(--space-6);
+}
+
+.feed-list > .acard + .acard {
+  border-top: 1px solid var(--border);
+}
+
+.feed-more {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+/* -------------------------- 5. Trending rail ----------------------------- */
+
+.feed-rail {
+  display: none; /* desktop-only affordance — see the 900px breakpoint below */
+}
+
+.rail-sticky {
+  position: sticky;
+  top: calc(var(--nav-height) + var(--space-5));
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--border);
+}
+
+.rail-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.rail-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.trend-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.trend-rank {
+  font-family: var(--font-serif);
+  font-size: var(--step-3);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--border-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.trend-title {
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  font-weight: 600;
+  line-height: var(--leading-snug);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.trend-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.rail-link {
+  font-size: var(--step--1);
+}
+
+.rail-foot {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+/* ----------------------------- 6. Reader --------------------------------- */
+
+.reader {
+  padding-block: var(--space-4) var(--space-8);
+}
+
+.reader-head {
+  --gap: var(--space-4);
+}
+
+.reader-back {
+  font-weight: 500;
+}
+
+.reader-title {
+  margin: 0;
+}
+
+.reader-subtitle {
+  margin: 0;
+  font-size: var(--step-2);
+  color: var(--muted);
+}
+
+.reader-byline {
+  padding-block: var(--space-2);
+}
+
+/* The cover. Spans the whole container on desktop and goes edge-to-edge on
+   phones, where the container padding is the only thing in its way. */
+.reader-coverbox {
+  margin: var(--space-7) 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunk);
+}
+
+.reader-coverbox img,
+.reader-coverbox .skeleton {
+  width: 100%;
+  max-height: 540px;
+  object-fit: cover;
+}
+
+.reader-body {
+  padding-block: var(--space-2) var(--space-7);
+}
+
+/* Floating action bar — stays with the reader while the story scrolls past. */
+.reader-actionbar {
+  position: sticky;
+  bottom: var(--space-5);
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  pointer-events: none; /* the pill itself re-enables it */
+  margin-block: var(--space-6);
+}
+
+.reader-actionbar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  max-width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(1.6) blur(10px);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+
+.reader-actionbar-title {
+  max-width: 22ch;
+}
+
+.reader-totop {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.reader-foot {
+  padding-top: var(--space-4);
+}
+
+.reader-authorcard {
+  --gap: var(--space-4);
+}
+
+.reader-authorcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.reader-bio {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--step-1);
+  line-height: 1.6;
+  color: var(--text-soft);
+  max-width: 60ch;
+}
+
+.reader-more .acard {
+  padding-block: var(--space-4);
+}
+
+.reader-more .acard + .acard {
+  border-top: 1px solid var(--border);
+}
+
+/* ---------------------------- 7. Skeletons ------------------------------- */
+
+.sk-line {
+  display: block;
+  height: 0.7rem;
+  border-radius: var(--radius-sm);
+}
+
+.sk-line-sm {
+  height: 0.55rem;
+}
+
+.sk-line-title {
+  height: 1.4rem;
+}
+
+.sk-line-display {
+  height: 2.1rem;
+}
+
+.sk-chip {
+  display: block;
+  height: 1.4rem;
+  border-radius: var(--radius-pill);
+}
+
+.sk-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+}
+
+/* --------------------------- 8. Breakpoints ------------------------------ */
+
+/* Phones — the card keeps a small square thumbnail rather than losing its
+   image, and the reading page loses its side padding for the cover. */
+@media (max-width: 640px) {
+  .acard-feed {
+    gap: var(--space-4);
+  }
+
+  .acard-feed .acard-cover {
+    width: 92px;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-sm);
+  }
+
+  .acard-excerpt {
+    font-size: var(--step-0);
+  }
+
+  .acard-foot {
+    gap: var(--space-3);
+  }
+
+  .acard-actions,
+  .reader-actionbar-slot {
+    gap: var(--space-3);
+  }
+
+  .acard-thumb {
+    width: 64px;
+  }
+
+  .feed-list > .acard {
+    padding-block: var(--space-5);
+  }
+
+  .reader-coverbox {
+    margin-inline: calc(-1 * var(--space-5));
+    border-radius: 0;
+  }
+
+  .reader-actionbar-title {
+    display: none; /* the pill keeps only the actions on a narrow screen */
+  }
+
+  .reader-authorcard-head {
+    align-items: flex-start;
+  }
+}
+
+/* 390px-class phones keep their thumbnail — just a smaller one. */
+@media (max-width: 420px) {
+  .acard-feed .acard-cover {
+    width: 72px;
+  }
+
+  .feed-tabs {
+    gap: var(--space-4);
+  }
+}
+
+/* Below ~340px there is no room for both, so the image steps aside and the
+   title and excerpt keep a readable measure. */
+@media (max-width: 340px) {
+  .acard-feed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .acard-feed .acard-cover {
+    display: none;
+  }
+}
+
+/* Desktop — the trending rail appears alongside the feed. */
+@media (min-width: 900px) {
+  .feed-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .feed-rail {
+    display: block;
+  }
+}
