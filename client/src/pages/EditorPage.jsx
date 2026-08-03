@@ -31,6 +31,13 @@
  *    outlives its session can neither resurrect the old article id nor overwrite
  *    the new story's baseline — it simply evaporates.
  *
+ *    The rule is symmetric and has no exemptions: an abandoned operation writes
+ *    NOTHING back, and that includes clearing `busy`. Since `busy` also survives
+ *    reconciliation, beginSession() is what clears it — for every kind, not just
+ *    the one that happens to be commonest. Publish, unpublish and the cover
+ *    upload all follow this; adding a fourth async action means capturing `gen`
+ *    at the top and gating every write-back, its `finally` included.
+ *
  * 4. NOTHING LEAVES WITHOUT BEING WRITTEN. Publish drains the in-flight save
  *    before it publishes (so it can never make an older version public) and
  *    refuses rather than publishing a stale one. Unmount flushes a pending
@@ -171,6 +178,16 @@ export default function EditorPage() {
    * outside React's effect lifecycle) are dropped here, and the save mutex is
    * released so the new session can save immediately without waiting on a
    * request that no longer has anywhere to land.
+   *
+   * THIS IS ALSO THE ONLY PLACE A SESSION'S `busy` IS CLEARED ON ABANDONMENT,
+   * and it clears it whatever it holds. That is the other half of the
+   * generation gate, not a nicety: because the gate makes an abandoned
+   * operation's `finally` decline to clear `busy` (it must not clear the NEW
+   * session's), the reset is the only thing left that can. A reset that cleared
+   * only some kinds would wedge the rest — press Publish, then "New story"
+   * while the request is in flight, and the brand-new draft would render its
+   * Publish button disabled and reading "Publishing…" for the rest of the
+   * session, with no request left alive to ever release it.
    */
   const beginSession = useCallback((key) => {
     genRef.current += 1;
@@ -179,6 +196,7 @@ export default function EditorPage() {
     rerunRef.current = false;
     activeSaveRef.current = null;
     sessionRef.current = key;
+    setBusy('');
     return genRef.current;
   }, []);
 
@@ -251,10 +269,8 @@ export default function EditorPage() {
       setSavedAt(null);
       setError('');
       setLoadFailed(false);
-      // A load may have been abandoned mid-flight to get here. Clearing busy
-      // unconditionally is what stops 'loading' sticking forever and silently
-      // disabling autosave for the rest of the session.
-      setBusy((prev) => (prev === 'loading' ? '' : prev));
+      // `busy` is already clear: beginSession() above drops it, whatever the
+      // abandoned operation was — a load, a publish or a cover upload.
       hydratedRef.current = true;
       return undefined;
     }
@@ -526,31 +542,50 @@ export default function EditorPage() {
     setReloadNonce((n) => n + 1);
   };
 
+  /**
+   * Same generation contract as publish(). Without it an unpublish that the
+   * writer walked out on lands on whatever the form holds NOW: it would stamp
+   * the old story's status onto the new session's identityRef and flip a
+   * brand-new draft's badge, because identityRef is what the next save and
+   * publish both read.
+   */
   const unpublish = async () => {
-    if (!articleId) return;
+    const target = identityRef.current.id;
+    if (!target) return;
+    const gen = genRef.current;
     setBusy('publishing');
     setError('');
     try {
-      const updated = await api.post(`/api/articles/${articleId}/unpublish`);
+      const updated = await api.post(`/api/articles/${target}/unpublish`);
+      if (gen !== genRef.current) return;
       identityRef.current = { ...identityRef.current, status: updated.status };
       setStatus(updated.status);
     } catch (err) {
-      setError(err?.message || 'Could not unpublish that story.');
+      if (gen === genRef.current) setError(err?.message || 'Could not unpublish that story.');
     } finally {
-      setBusy('');
+      // Only this session's own busy — an abandoned one was already cleared by
+      // beginSession, and clearing here would stomp the NEW session's state.
+      if (gen === genRef.current) setBusy('');
     }
   };
 
+  /**
+   * Ditto: an upload the writer walked out on must not drop the old story's
+   * cover image into the new one, where autosave would then persist it.
+   */
   const pickCover = async (file) => {
     if (!file) return;
+    const gen = genRef.current;
     setBusy('cover');
     setError('');
     try {
-      setCoverUrl(await uploadImage(file));
+      const url = await uploadImage(file);
+      if (gen !== genRef.current) return;
+      setCoverUrl(url);
     } catch (err) {
-      setError(err?.message || 'That cover image would not upload.');
+      if (gen === genRef.current) setError(err?.message || 'That cover image would not upload.');
     } finally {
-      setBusy('');
+      if (gen === genRef.current) setBusy('');
     }
   };
 
