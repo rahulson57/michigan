@@ -43,15 +43,18 @@ const rand = mulberry32(20260802);
  * Local SVG media generation
  * ------------------------------------------------------------------ */
 
+// Cool, desaturated, lake-adjacent — tuned to sit quietly next to the
+// design-system accent (--accent: #0e6b70) rather than compete with it.
+// [shadow, midtone, highlight]
 const PALETTES = [
-  ['#1c2a3a', '#3f6f8f', '#e9f0f4'],
-  ['#2b1f33', '#7d4a86', '#f4ecf6'],
-  ['#12302a', '#3f8f6f', '#e8f5ef'],
-  ['#3a2418', '#a86a3c', '#f7efe6'],
-  ['#1b1f3a', '#5560a8', '#eceefa'],
-  ['#331d21', '#a8515f', '#f9ecee'],
-  ['#22301a', '#6f8f3f', '#f0f5e8'],
-  ['#101820', '#4a4f5c', '#eceff3'],
+  ['#0b2f34', '#17696b', '#e6f0ef'], // deep petrol
+  ['#10233a', '#2f5f8f', '#e8eef6'], // lake at night
+  ['#1b232b', '#4a5f6b', '#eceff1'], // slate
+  ['#1c2a22', '#43705a', '#e9f1ec'], // moss
+  ['#191d33', '#454f86', '#ebedf7'], // indigo
+  ['#2f2119', '#8a5a44', '#f3ece7'], // clay — the one warm note
+  ['#241a2b', '#5f4372', '#efeaf3'], // plum
+  ['#14252b', '#38707c', '#e7f0f2'], // storm
 ];
 
 function paletteFor(key) {
