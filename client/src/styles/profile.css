@@ -1,0 +1,689 @@
+/* ==========================================================================
+   michigan — profiles
+   --------------------------------------------------------------------------
+   Everything specific to /@username and /settings/profile. Built entirely on
+   the tokens and primitives in global.css (.card, .avatar, .btn, .field, …);
+   nothing here redefines a shared class, so this file can be loaded or dropped
+   without touching any other screen.
+
+   Contents
+     1. Cover + identity header
+     2. Social links
+     3. Tabs and the story list
+     4. Reshares
+     5. Image upload field (avatar / cover, also used by the editor form)
+     6. The profile editor
+     7. Small screens
+   ========================================================================== */
+
+/* --------------------- 1. Cover + identity header ----------------------- */
+
+.profile-page {
+  padding-bottom: var(--space-8);
+}
+
+.profile-cover {
+  position: relative;
+  width: 100%;
+  height: clamp(150px, 24vw, 280px);
+  overflow: hidden;
+  background: var(--bg-sunk);
+}
+
+/* No cover uploaded yet — a quiet wash rather than a grey hole. */
+.profile-cover-empty {
+  background:
+    radial-gradient(120% 160% at 12% 0%, var(--accent-soft) 0%, transparent 58%),
+    linear-gradient(180deg, var(--bg-sunk) 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Hover-to-change control, owner only. Always visible to keyboards. */
+.profile-cover-edit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.profile-cover-edit .upload-wrap-overlay,
+.profile-cover-edit .upload {
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+}
+
+/* One column, the same width as the article measure, with the cover running
+   full-bleed behind it. */
+.profile-shell {
+  position: relative;
+  max-width: var(--container-narrow);
+}
+
+/* Twitter/Medium shape: the avatar straddles the bottom edge of the cover and
+   the identity block sits beneath it. */
+.profile-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding-bottom: var(--space-6);
+}
+
+.profile-avatar-wrap {
+  position: relative;
+  align-self: flex-start;
+  flex: 0 0 auto;
+  margin-top: -4rem; /* half the avatar, so it straddles the cover edge */
+}
+
+.profile-avatar {
+  width: 8rem;
+  height: 8rem;
+  border: 4px solid var(--surface);
+  box-shadow: var(--shadow);
+  background: var(--bg-sunk);
+}
+
+.profile-avatar-edit {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.profile-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
+}
+
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.profile-name {
+  margin: 0;
+  font-size: var(--step-4);
+}
+
+.profile-edit-btn {
+  flex: 0 0 auto;
+}
+
+.profile-handle {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+}
+
+.profile-bio {
+  margin: var(--space-2) 0 0;
+  max-width: var(--measure);
+  font-size: var(--step-1);
+  line-height: var(--leading-body);
+}
+
+.profile-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+
+.profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.profile-stats strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------------------------- 2. Social links ---------------------------- */
+
+.social-links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+
+.social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+  transition:
+    color var(--transition),
+    border-color var(--transition),
+    background var(--transition),
+    transform var(--transition);
+}
+
+.social-link:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.social-link:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* Labelled variant — used in the editor's live preview. */
+.social-links-text .social-link {
+  width: auto;
+  height: auto;
+  padding: 0.3rem 0.75rem;
+  font-family: var(--font-sans);
+  font-size: var(--step--1);
+}
+
+.social-link-text {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------ 3. Tabs and story list ------------------------- */
+
+.profile-tabs {
+  display: flex;
+  gap: var(--space-5);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-6);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.profile-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.profile-tab {
+  position: relative;
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: var(--space-3) 0;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition);
+}
+
+.profile-tab:hover {
+  color: var(--text);
+}
+
+.profile-tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.profile-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-sm);
+}
+
+.profile-tab-count {
+  margin-left: var(--space-2);
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunk);
+  color: var(--muted);
+  font-size: var(--step--2);
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-list {
+  --gap: var(--space-5);
+}
+
+/* The card below is a stand-in: when the shared <ArticleCard> lands, these
+   rules simply stop matching anything. */
+.profile-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+  padding: var(--space-5);
+}
+
+.profile-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.profile-card-byline {
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+
+.profile-card .card-title {
+  margin: 0;
+  font-size: var(--step-3);
+}
+
+.profile-card-subtitle {
+  margin: 0;
+  font-size: var(--step-1);
+  color: var(--text-soft);
+}
+
+.profile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.profile-card-cover {
+  flex: 0 0 auto;
+  width: 8.5rem;
+  height: 6rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-sunk);
+}
+
+.profile-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.profile-skeleton-avatar {
+  width: 8rem;
+  height: 8rem;
+  border-radius: 50%;
+  margin-top: -3.25rem;
+}
+
+.profile-skeleton-row {
+  height: 7rem;
+  border-radius: var(--radius);
+}
+
+/* ------------------------------ 4. Reshares ------------------------------ */
+
+.profile-reshare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--accent-soft);
+}
+
+.profile-reshare-byline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.profile-reshare-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.profile-reshare-label strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.profile-reshare-comment {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  max-width: var(--measure);
+  font-family: var(--font-serif);
+  font-size: var(--step-1);
+  line-height: var(--leading-snug);
+  color: var(--text-soft);
+}
+
+/* -------------------------- 5. Image upload field ------------------------ */
+
+.upload-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.upload {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-sunk);
+  color: var(--muted);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    background var(--transition);
+}
+
+.upload-field.upload-banner {
+  width: 100%;
+  height: clamp(120px, 20vw, 190px);
+  border-radius: var(--radius);
+}
+
+.upload-field.upload-circle {
+  width: 7rem;
+  height: 7rem;
+  border-radius: 50%;
+}
+
+.upload:hover:not(:disabled),
+.upload.is-dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.upload.is-dragging {
+  box-shadow: var(--ring);
+}
+
+.upload:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.upload:disabled,
+.upload.is-disabled {
+  cursor: default;
+}
+
+.upload.has-image {
+  border-style: solid;
+  border-color: var(--border);
+}
+
+.upload-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.upload-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* The scrim that carries the camera icon and the progress copy. */
+.upload-veil {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: color-mix(in srgb, #04161c 55%, transparent);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: var(--step--1);
+  text-align: center;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+/* Show it on hover, on keyboard focus, while dragging, while uploading, and
+   permanently when there is no image to look at yet. */
+.upload:hover .upload-veil,
+.upload:focus-visible .upload-veil,
+.upload.is-dragging .upload-veil,
+.upload.is-busy .upload-veil,
+.upload-field:not(.has-image) .upload-veil {
+  opacity: 1;
+}
+
+.upload-field:not(.has-image) .upload-veil {
+  background: transparent;
+  color: var(--muted);
+}
+
+.upload-veil-text {
+  max-width: 22ch;
+  line-height: var(--leading-snug);
+}
+
+/* Indeterminate bar — fetch gives no byte-level progress, so this reports
+   "in flight" honestly rather than faking a percentage. */
+.upload-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  overflow: hidden;
+}
+
+.upload-progress::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--accent);
+  animation: michigan-upload-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes michigan-upload-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+/* Overlay variant — the hover-to-change controls on the profile header. */
+.upload-overlay {
+  border: 0;
+  background: transparent;
+  border-radius: inherit;
+}
+
+.upload-overlay .upload-veil {
+  opacity: 0;
+}
+
+/* On your own profile the control has to be discoverable without a hover, so
+   the camera sits in a small chip that reads on any cover photo. */
+.upload-overlay .upload-placeholder {
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: var(--space-3);
+  color: #fff;
+}
+
+.upload-overlay.upload-circle .upload-placeholder {
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 var(--space-2);
+}
+
+.upload-overlay .upload-placeholder svg {
+  padding: 0.35rem;
+  box-sizing: content-box;
+  border-radius: 50%;
+  background: color-mix(in srgb, #04161c 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.upload-overlay:hover .upload-veil,
+.upload-overlay:focus-visible .upload-veil,
+.upload-overlay.is-dragging .upload-veil,
+.upload-overlay.is-busy .upload-veil {
+  opacity: 1;
+}
+
+.upload-wrap-overlay {
+  gap: 0;
+}
+
+.upload-wrap-overlay .form-error {
+  position: absolute;
+  left: 0;
+  bottom: calc(-1 * var(--space-6));
+  z-index: 1;
+  max-width: min(28rem, 90vw);
+}
+
+.upload-overlay.upload-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+/* --------------------------- 6. Profile editor --------------------------- */
+
+.profile-edit .panel {
+  --gap: var(--space-5);
+}
+
+.profile-edit-images .upload-wrap {
+  max-width: 100%;
+}
+
+.profile-toast {
+  border-color: color-mix(in srgb, var(--positive) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.profile-prefixed {
+  display: flex;
+  align-items: stretch;
+}
+
+.profile-prefix {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--bg-sunk);
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.profile-prefixed .input {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  min-width: 0;
+}
+
+.profile-counter {
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-edit-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+.profile-edit-actions {
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+/* ---------------------------- 7. Small screens --------------------------- */
+
+@media (max-width: 720px) {
+  .profile-avatar,
+  .profile-skeleton-avatar {
+    width: 6rem;
+    height: 6rem;
+  }
+
+  .profile-avatar-wrap {
+    margin-top: -2.5rem;
+  }
+
+  .profile-name-row {
+    align-items: flex-start;
+  }
+
+  .profile-name {
+    font-size: var(--step-3);
+  }
+
+  .profile-meta-row {
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .profile-card {
+    flex-direction: column-reverse;
+    gap: var(--space-4);
+  }
+
+  .profile-card-cover {
+    width: 100%;
+    height: 9rem;
+  }
+
+  .profile-tabs {
+    gap: var(--space-4);
+  }
+}
