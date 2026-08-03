@@ -1,0 +1,28 @@
+{
+  "name": "michigan",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "michigan — a Medium-style blogging platform",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node server/index.js",
+    "dev:client": "npm --workspace client run dev",
+    "seed": "node server/seed.js",
+    "build": "npm run check:routes && npm --workspace client run build",
+    "check:routes": "node client/scripts/check-routes.mjs",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "setup": "npm install && npm run seed",
+    "start": "node server/index.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
